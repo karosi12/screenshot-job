@@ -1,0 +1,10 @@
+/dist
+/node_modules
+.env
+*-lock.json
+/logs
+todo
+.vscode
+coverage
+.nyc_output
+
