@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 import * as bodyParser from "body-parser";
-import { Logger } from "./logger/logger";
+import { Logger } from "../logger/logger";
 import cors from "cors";
 import axios from "axios";
 import express, { Application, Request, Response } from "express";
@@ -50,7 +50,6 @@ app.get("/", (req: Request, res: Response) => {
 const job = new CronJob("* * * * * *", function () {
   ch.consume(queue, async function (msg) {
     if (msg !== null) {
-      console.log("hi", msg.content.toString());
       const payload = JSON.parse(msg.content.toString());
 
       const { uri, websiteName } = payload;
@@ -85,6 +84,7 @@ app.post("/api/upload", async (req, res) => {
     if (imguri) {
       const content = await readFileAsync(`img/${imguri}`);
       if (!content) {
+        logger.error(`unable to upload file`);
         return res
           .status(400)
           .send({ message: "unable to upload file", data: null });
@@ -99,6 +99,7 @@ app.post("/api/upload", async (req, res) => {
         const response = await s3.upload(params).promise();
         await unlinkAsync(`img/${imguri}`);
         if (!response) {
+          logger.error(`unable to save file ${imguri}`);
           return res.status(400).send({
             message: `unable to save file ${imguri}`,
             data: null,
@@ -109,12 +110,14 @@ app.post("/api/upload", async (req, res) => {
         const payload = JSON.stringify(responsePayload);
         ch.assertQueue(queue, { durable: true });
         ch.sendToQueue(queue, Buffer.from(payload), { persistent: true }); // No data lost
+        logger.info(`website image was uploaded successfully`);
         return res.status(200).send({
           message: `website image was uploaded successfully`,
           data: `${response.Location}`,
         });
       }
     } else {
+      logger.error(`No file found, try upload again`);
       return res
         .status(400)
         .send({ message: "No file found, try upload again", data: null });

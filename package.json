@@ -5,10 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "npm run build",
-    "dev": "nodemon server.ts",
+    "dev": "nodemon src/server.ts",
     "build": "npm run clean && tsc && node dist/server.js",
-    "clean": "rimraf ./dist",
-    "test": "npm run clean && tsc && cross-env NODE_ENV=test nyc --reporter=html mocha --require babel-core/register src/tests/*.spec.ts --exit && nyc report --timeout 50000"
+    "clean": "rimraf ./dist"
   },
   "keywords": [],
   "author": "",
