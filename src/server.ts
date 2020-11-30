@@ -79,7 +79,6 @@ app.get("/api/screenshot/response", async (req, res) => {
                 .send({ message: "data found", data: JSON.parse(value) });
             });
           } else {
-            logger.info("not found =>", found);
             const browser = await puppeteer.launch({ headless: true });
             const page = await browser.newPage();
             await page.goto(`${uri}`, {
