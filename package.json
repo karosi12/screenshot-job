@@ -7,7 +7,8 @@
     "start": "npm run build",
     "dev": "nodemon src/server.ts",
     "build": "npm run clean && tsc && node dist/server.js",
-    "clean": "rimraf ./dist"
+    "clean": "rimraf ./dist",
+    "test": "npm run clean && tsc && cross-env NODE_ENV=test nyc --reporter=html mocha --require babel-core/register src/tests/*.spec.ts --exit && nyc report --timeout 50000"
   },
   "keywords": [],
   "author": "",
@@ -45,6 +46,7 @@
     "eslint": "^5.15.2",
     "eslint-config-airbnb": "^17.1.0",
     "eslint-plugin-import": "^2.16.0",
+    "expect.js": "^0.3.1",
     "factory-girl": "5.0.4",
     "faker": "^5.1.0",
     "mocha": "^6.1.4",

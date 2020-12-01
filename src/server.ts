@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 import * as bodyParser from "body-parser";
-import { Logger } from "../logger/logger";
+import { Logger } from "./logger/logger";
 import cors from "cors";
 import axios from "axios";
 import express, { Application, Request, Response } from "express";
@@ -9,7 +9,7 @@ const puppeteer = require("puppeteer");
 import { CronJob } from "cron";
 import redis from "redis";
 
-import amqp from "amqplib/callback_api";
+import amqp from "amqplib";
 const app: Application = express();
 const fs = require("fs");
 const { promisify } = require("util");
@@ -28,7 +28,6 @@ const s3 = new AWS.S3({
   accessKeyId: process.env.ACCESS_KEYID,
   secretAccessKey: process.env.SECRET_ACCESS_KEY,
 });
-const CONN_URL = "amqp://localhost";
 let ch: {
   assertQueue(queue: string): void;
   consume(queue: string, callback: Function);
@@ -37,12 +36,6 @@ let ch: {
   prefetch(param: number);
 };
 const queue = "screenshot-messages";
-amqp.connect(CONN_URL, function (err, conn) {
-  conn.createChannel(function (err, channel) {
-    ch = channel;
-  });
-});
-
 app.use(bodyParser.json());
 app.use(
   bodyParser.urlencoded({
@@ -57,9 +50,11 @@ app.get("/", (req: Request, res: Response) => {
 
 app.get("/api/screenshot/response", async (req, res) => {
   try {
-    ch.assertQueue(queue);
-    ch.prefetch(1);
-    ch.consume(queue, async function (msg) {
+    const conn = await amqp.connect(process.env.BROKER_URL);
+    ch = await conn.createChannel();
+    await ch.assertQueue(queue);
+    await ch.prefetch(1);
+    await ch.consume(queue, async function (msg) {
       logger.info(JSON.stringify(JSON.parse(msg.content.toString())));
       if (msg !== null) {
         let payload = JSON.parse(msg.content.toString());
@@ -73,9 +68,8 @@ app.get("/api/screenshot/response", async (req, res) => {
           if (found === 1) {
             client.get(websiteName, (err, value) => {
               if (err) throw new Error(err);
-              ch.ack(msg);
               return res
-                .status(200)
+                .status(201)
                 .send({ message: "data found", data: JSON.parse(value) });
             });
           } else {
@@ -87,9 +81,10 @@ app.get("/api/screenshot/response", async (req, res) => {
             });
             const imgdir = `img/${websiteName}${+new Date()}.jpeg`;
             await page.screenshot({ path: `${imgdir}` });
+            await page.waitForTimeout(5000);
             await browser.close();
             if (imgdir) {
-              const content = await readFileAsync(`${imgdir}`)
+              const content = await readFileAsync(`${imgdir}`);
               if (!content) {
                 logger.error(`unable to upload file`);
                 return res
@@ -120,9 +115,10 @@ app.get("/api/screenshot/response", async (req, res) => {
                 client.set(websiteName, JSON.stringify(payload), redis.print);
                 client.get(websiteName, (err, value) => {
                   if (err) throw new Error(err);
+                  logger.info(value);
                   ch.ack(msg);
                   return res
-                    .status(200)
+                    .status(201)
                     .send({ message: "data created", data: JSON.parse(value) });
                 });
               }
