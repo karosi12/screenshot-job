@@ -32,10 +32,6 @@ File storage is digitalocean space
 - BUCKET=
 - UPLOAD_URI={baseuri}/api/upload
 
-# Features
-
-- job to get and send screenshot webpage uri
-
 # To Install
 
 - Download or clone
