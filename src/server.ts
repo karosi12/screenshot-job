@@ -3,39 +3,15 @@ dotenv.config();
 import * as bodyParser from "body-parser";
 import { Logger } from "./logger/logger";
 import cors from "cors";
-import axios from "axios";
 import express, { Application, Request, Response } from "express";
+import queueService from './helper/queueHelper';
+import cacheService from './helper/cacheHelper';
+import contentService from './helper/contentUploadHelper';
 const puppeteer = require("puppeteer");
-import { CronJob } from "cron";
-import redis from "redis";
-
-import amqp from "amqplib";
 const app: Application = express();
-const fs = require("fs");
-const { promisify } = require("util");
-const readFileAsync = promisify(fs.readFile);
-const unlinkAsync = promisify(fs.unlink);
 const logging = new Logger();
-const logger = logging.log("server");
-const AWS = require("aws-sdk");
-const client = redis.createClient();
-client.on("error", function (error) {
-  console.error(error);
-});
-const spaceEndpoint = new AWS.Endpoint(process.env.SPACE_ENDPOINT);
-const s3 = new AWS.S3({
-  endpoint: spaceEndpoint,
-  accessKeyId: process.env.ACCESS_KEYID,
-  secretAccessKey: process.env.SECRET_ACCESS_KEY,
-});
-let ch: {
-  assertQueue(queue: string): void;
-  consume(queue: string, callback: Function);
-  ack(acknowledgement);
-  sendToQueue(queueName, payload, {});
-  prefetch(param: number);
-};
-const queue = "screenshot-messages";
+const logger = logging.log("screenshot-job");
+
 app.use(bodyParser.json());
 app.use(
   bodyParser.urlencoded({
@@ -50,89 +26,25 @@ app.get("/", (req: Request, res: Response) => {
 
 app.get("/api/screenshot/response", async (req, res) => {
   try {
-    const conn = await amqp.connect(process.env.BROKER_URL);
-    ch = await conn.createChannel();
-    await ch.assertQueue(queue);
-    await ch.prefetch(1);
-    await ch.consume(queue, async function (msg) {
-      logger.info(JSON.stringify(JSON.parse(msg.content.toString())));
-      if (msg !== null) {
-        let payload = JSON.parse(msg.content.toString());
-        let { uri, websiteName } = payload;
-        // Typescript does not support Bluebird promisifyAll so I have to use callback.
-        client.exists(websiteName, async (err, found) => {
-          if (err)
-            return res
-              .status(400)
-              .send({ message: "something is wrong with caching" });
-          if (found === 1) {
-            client.get(websiteName, (err, value) => {
-              if (err) throw new Error(err);
-              return res
-                .status(201)
-                .send({ message: "data found", data: JSON.parse(value) });
-            });
-          } else {
-            const browser = await puppeteer.launch({ headless: true });
-            const page = await browser.newPage();
-            await page.goto(`${uri}`, {
-              timeout: 120000,
-              waitUntil: "networkidle0",
-            });
-            const imgdir = `img/${websiteName}${+new Date()}.jpeg`;
-            await page.screenshot({ path: `${imgdir}` });
-            await page.waitForTimeout(5000);
-            await browser.close();
-            if (imgdir) {
-              const content = await readFileAsync(`${imgdir}`);
-              if (!content) {
-                logger.error(`unable to upload file`);
-                return res
-                  .status(400)
-                  .send({ message: "unable to upload file", data: null });
-              } else {
-                const fileContent = await content;
-                const params = {
-                  Bucket: process.env.BUCKET,
-                  Key: `${imgdir}`,
-                  Body: fileContent,
-                  ACL: "public-read",
-                };
-                const response = await s3.upload(params).promise();
-                await unlinkAsync(`${imgdir}`);
-                if (!response) {
-                  logger.error(`unable to save file ${imgdir}`);
-                  return res.status(400).send({
-                    message: `unable to save file ${imgdir}`,
-                    data: null,
-                  });
-                }
-                const responsePayload = { uri: response.Location };
-                logger.info(JSON.stringify(responsePayload));
-                logger.info(`website image was uploaded successfully`);
-                uri = response.Location;
-                payload = { websiteName, uri };
-                client.set(websiteName, JSON.stringify(payload), redis.print);
-                client.get(websiteName, (err, value) => {
-                  if (err) throw new Error(err);
-                  logger.info(value);
-                  ch.ack(msg);
-                  return res
-                    .status(201)
-                    .send({ message: "data created", data: JSON.parse(value) });
-                });
-              }
-            } else {
-              logger.error(`No file found, try upload again`);
-              return res.status(400).send({
-                message: "No file found, try upload again",
-                data: null,
-              });
-            }
-          }
-        });
-      }
+    const { data, message } = await queueService.getMessageFromQueue();
+    if(!data) return res.status(400).send({message})
+    let payload = JSON.parse(data.content.toString());
+    let { uri, websiteName } = payload;
+    const found = await cacheService.getData(websiteName);
+    if(found.data) return res.status(200).send({message: found.message, data: {uri: found.data.uri, websiteName}})
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(`${uri}`, {
+      timeout: 120000,
+      waitUntil: "networkidle0",
     });
+    const imgdir = `img/${websiteName}${+new Date()}.jpeg`;
+    await page.screenshot({ path: `${imgdir}` });
+    await page.waitForTimeout(5000);
+    await browser.close();
+    const contentSent =  await contentService.uploadFile(imgdir);
+    await cacheService.addData(websiteName, {uri: contentSent.data, websiteName});
+    return res.status(200).send({ message: `${websiteName} was uploaded successfully`, data: {websiteName, uri: contentSent.data}})
   } catch (error) {
     logger.error(`error occured ${JSON.stringify(error)}`);
     return res.status(500).send({ message: "Internal server error" });
