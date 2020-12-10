@@ -8,8 +8,8 @@ let ch;
 describe("#POST Screenshot", function () {
   before(async function () {
     let payload = {
-      websiteName: "stackoverflow",
-      uri: "https://stackoverflow.com",
+      websiteName: "slack",
+      uri: "https://slack.com",
     };
     const queue = "screenshot-messages";
     const conn = await amqp.connect(process.env.BROKER_URL);
@@ -23,7 +23,8 @@ describe("#POST Screenshot", function () {
     const res = await request(app)
       .get("/api/screenshot/response")
       .set("Accept", "application/json")
-      .expect(201);
+      .expect(200);
+    console.log(res.body)
     expect(res.body).have.property("message");
     expect(res.body).have.property("data");
     expect(res.body.data).have.property("uri");
